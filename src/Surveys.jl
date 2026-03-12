@@ -2,7 +2,15 @@ module Surveys
 using Statistics, StatsBase, StatsAPI, StatsModels, DiffResults, ForwardDiff, PDMats, LinearAlgebra
 include("docboilerplate.jl")
 
-export SampleSum, π_sum, pwr_sum, π_lm, brewer
+export SampleSum, π_sum, pwr_sum, π_lm, BrewerJointProbs
+
+struct SampleProbs
+    probs::Vector{Float64}
+end
+
+struct SIProbs end
+
+struct BrewerJointProbs end
 
 "Population estimate and its variance."
 struct SampleSum
@@ -108,6 +116,15 @@ function π_sum(xs::AbstractVector{<:Real}, probs::AbstractVector{<:Real}, joint
     Δ = 1 .- (probs .* probs') ./ joint_probs
     y = xs ./ probs
     SampleSum(sum(y), y' * (Δ * y))
+end
+
+# TODO: this is still not what R's survey package gives.
+function π_sum(xs::AbstractVector{<:Real}, probs::AbstractVector{<:Real}, joint_probs::BrewerJointProbs)
+    n = length(xs)
+    y = xs ./ probs
+    total = sum(y)
+    c = n .* (1 .- probs) ./ (n - 1)
+    SampleSum(total, sum(c .* (y .- total / length(xs)) .^ 2))
 end
 
 """
@@ -228,19 +245,5 @@ function pwr_sum(xs::AbstractVector{SampleSum}, probs::AbstractVector{<:Real})
     y = [x.sum for x in xs] ./ probs
     SampleSum(mean(y), var(y; corrected=true) / N)
 end
-
-"""
-Approxiate pairwise sampling probability for sampling proportional to size using Brewer's algorithm.
-"""
-function brewer(p)
-    n = length(p)
-    np = n .- p
-    ratios = p ./ np
-    denoms = sum(ratios) .- ratios
-    approx = 1 ./ (np .* denoms')
-    (n - 1) * (p .* p') .* (approx + approx') ./ 2
-end
-
-# TODO: raking
 
 end # module Surveys
