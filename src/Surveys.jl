@@ -81,8 +81,13 @@ overall_total = sum(cluster_totals, SI(N_clusters))
 R's `survey::svydesign()` with `id=~cluster`
 """
 function Base.sum(xs::AbstractVector{SampleSum}, probs::SurveyDesign)
-    throw(DomainError(probs, "Cluster sampling estimation has not been implemented for design $(typeof(probs))."))
+    ss = sum([x.sum for x in xs], probs)
+    SampleSum(ss.sum, ss.var + cluster_variance([x.var for x in xs], probs))
 end
+
+cluster_variance(xs, probs::SI) = probs.N * mean(xs)
+cluster_variance(xs, probs::WithoutReplacement) = sum(xs ./ probs.probs)
+
 
 Base.:+(a::SampleSum, b::SampleSum) = SampleSum(a.sum + b.sum, a.var + b.var)
 Base.:+(a::Real, b::SampleSum) = SampleSum(a + b.sum, b.var)
@@ -153,22 +158,10 @@ function Base.sum(xs::AbstractVector{<:Real}, probs::SI)
     end
 end
 
-function Base.sum(xs::AbstractVector{SampleSum}, probs::SI)
-    N = probs.N
-    m, v = mean_and_var((x.sum for x in xs); corrected=true)
-    SampleSum(N * m, N^2 * (1 / length(xs) - 1 / N) * v + N * mean(x.var for x in xs))
-end
-
 function Base.sum(xs::AbstractVector{<:Real}, probs::WithoutReplacement)
     Δ = 1 .- (probs.probs .* probs.probs') ./ probs.joint_probs
     y = xs ./ probs.probs
     SampleSum(sum(y), y' * (Δ * y))
-end
-
-function Base.sum(xs::AbstractVector{SampleSum}, probs::WithoutReplacement)
-    Δ = 1 .- (probs.probs .* probs.probs') ./ probs.joint_probs
-    y = [x.sum for x in xs] ./ probs.probs
-    SampleSum(sum(y), y' * (Δ * y) + sum([x.var for x in xs] ./ probs.probs))
 end
 
 function Base.sum(f::Function, xs::Matrix{<:Real}, probs::WithoutReplacement)
@@ -225,6 +218,11 @@ function Base.sum(f::FormulaTerm, df, df2, probs::SurveyDesign)
     model_based_sum(X, t_x, y, probs)
 end
 
+function model_based_sum(X, t_x, y::AbstractVector{SampleSum}, probs::SurveyDesign)
+    ss = model_based_sum(X, t_x, [yi.sum for yi in y], probs)
+    SampleSum(ss.sum, ss.var + cluster_variance([yi.var for yi in y], probs))
+end
+
 # Hold on: why is the expression for WithoutReplacment so much
 # simpler than for SI? What if I made g = vec(t_x * A) for SI instead?
 function model_based_sum(X, t_x, y, probs::WithoutReplacement)
@@ -232,10 +230,6 @@ function model_based_sum(X, t_x, y, probs::WithoutReplacement)
     XX = Xt_A_X(Λ, X)
     A = XX \ (X' * Λ)
     g = vec(t_x * A)
-    cluster_sum(X, A, g, y, probs)
-end
-
-function cluster_sum(X, A, g, y::AbstractVector{<:Real}, probs::WithoutReplacement)
     β = A * y
     e = y - X * β
     u = g .* e
@@ -243,45 +237,17 @@ function cluster_sum(X, A, g, y::AbstractVector{<:Real}, probs::WithoutReplaceme
     SampleSum(sum(g .* y), u' * (Δ * u))
 end
 
-function cluster_sum(X, A, g, y::AbstractVector{SampleSum}, probs::WithoutReplacement)
-    ysum = Float64[yi.sum for yi in y]
-    yvar = Float64[yi.var for yi in y]
-
-    β = A * ysum
-    e = ysum - X * β
-    u = g .* e
-    Δ = 1 .- (probs.probs .* probs.probs') ./ probs.joint_probs
-    SampleSum(sum(g .* ysum), u' * (Δ * u) + sum(yvar ./ probs.probs))
-end
-
 function model_based_sum(X, t_x, y, probs::SI)
     N = probs.N
+    n = length(y)
     XX = X' * X
     A = XX \ X'
     t_hat_x = N * mean(X; dims=1)
     n = size(X, 1)
     g = 1 .+ vec((n / N) * (t_x - t_hat_x) * A)
-    cluster_sum(X, A, g, y, probs)
-end
-
-function cluster_sum(X, A, g, y::AbstractVector{<:Real}, probs::SI)
-    N = probs.N
-    n = length(y)
     β = A * y
     e = y - X * β
     SampleSum(N * mean(g .* y), N^2 * (1 - n / N) / n * var(g .* e; corrected=true))
-end
-
-function cluster_sum(X, A, g, y::AbstractVector{<:SampleSum}, probs::SI)
-    N = probs.N
-    n = length(y)
-    ysum = Float64[yi.sum for yi in y]
-    yvar = Float64[yi.var for yi in y]
-    β = A * ysum
-    e = ysum - X * β
-    SampleSum(N * mean(g .* ysum),
-        N^2 * (1 - n / N) / n * var(g .* e; corrected=true) +
-        N * mean(yvar))
 end
 
 function Base.sum(xs::AbstractVector{<:Real}, probs::WithReplacement)
