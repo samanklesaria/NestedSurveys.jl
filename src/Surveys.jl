@@ -114,7 +114,7 @@ struct SampleSums
     "Estimates of population totals for each variable"
     sums_M::Vector{Float64}
     "Sample x variable matrix of observations"
-    samples_NM::Matrix{Float64}
+    samples_nM::Matrix{Float64}
     "Population size"
     N::Int
 end
@@ -131,7 +131,7 @@ function Base.sum(f::Function, xs::Vector{SampleSums})
     ForwardDiff.gradient!(result, f, x0_M)
     ∇f_M = DiffResults.gradient(result)
     result_var = sum(xs; init=0.0) do x
-        sum(x.samples_NM * ∇f_M, SI(x.N)).var
+        sum(x.samples_nM * ∇f_M, SI(x.N)).var
     end
     SampleSum(DiffResults.value(result), result_var)
 end
@@ -142,7 +142,7 @@ function Base.sum(f::Function, xs::Vector{SampleSums}, probs::SI)
     result = DiffResults.GradientResult(x0_M)
     ForwardDiff.gradient!(result, f, x0_M)
     ∇f_M = DiffResults.gradient(result)
-    us = [sum(x.samples_NM * ∇f_M, SI(x.N)) for x in xs]
+    us = [sum(x.samples_nM * ∇f_M, SI(x.N)) for x in xs]
     v = var(u.sum for u in us; corrected=true)
     SampleSum(DiffResults.value(result),
         N^2 * (1 / length(us) - 1 / N) * v + N * mean(u.var for u in us))
@@ -252,11 +252,6 @@ end
 
 function Base.sum(xs::AbstractVector{<:Real}, probs::WithReplacement)
     y = xs ./ probs.probs
-    SampleSum(mean(y), var(y; corrected=true) / length(xs))
-end
-
-function Base.sum(xs::AbstractVector{SampleSum}, probs::WithReplacement)
-    y = [x.sum for x in xs] ./ probs
     SampleSum(mean(y), var(y; corrected=true) / length(xs))
 end
 
