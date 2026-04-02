@@ -116,42 +116,6 @@ svyratio(~api.stu, ~enroll, srs_design)
 
 The `sum` function uses automatic differentiation to compute the Taylor series approximation to the variance of nonlinear estimators.
 
-## Linearization with Stratification and Clustering
-
-When `sum` is passed a Matrix and `SI` object, it creates a `SampleSums` object. This can be passed to `sum` to get clustered or stratified Taylor series variance estimates.
-
-**Julia:**
-```julia
-@chain apistrat begin
-    @groupby(:stype)
-    @combine(:subtotal = sum([:api_stu :enroll], SI(Int(:fpc[1]))))
-    @combine(:total = sum(a->a[1] / a[2], :subtotal))
-end
-```
-
-**R equivalent:**
-```r
-strat_design <- svydesign(id=~1, fpc=~fpc, strata=~stype, data=apistrat)
-svyratio(~api.stu, ~enroll, strat_design)
-```
-
-## Coefficient Estimation
-
-For regression coefficient estimation with design-based variance, use `π_lm` with a formula and design specification.
-
-**Julia:**
-```julia
-π_lm(@formula(api_stu ~ 1 + enroll), apisrs, SI(6194))
-```
-
-**R equivalent:**
-```r
-srs_design <- svydesign(id=~1, fpc=~fpc, data=apisrs)
-svyglm(api.stu ~ enroll, srs_design)
-```
-
-The `π_lm` function returns a vector of `SampleSum` objects, one for each coefficient, with design-based variance estimates.
-
 ## Regression-Assisted Estimation
 
 For regression-assisted (calibration) estimation, use `sum` with a formula, sample data, population data, and design.
@@ -171,7 +135,6 @@ svytotal(~api.stu, calibrate(srs_design, ~enroll, c('(Intercept)'=6194, enroll=4
 
 For sampling with replacement, use `sum` with a `WithReplacement` object containing sampling probabilities.
 
-**Julia:**
 ```julia
 result = sum(observations, WithReplacement(sample_probs))
 ```
@@ -182,7 +145,6 @@ This computes the Hansen-Hurwitz estimator for the total.
 
 For unequal probability sampling without replacement, use `sum` with a `WithoutReplacement` object containing inclusion probabilities and joint inclusion probabilities.
 
-**Julia:**
 ```julia
 result = sum(observations, WithoutReplacement(inclusion_probs, joint_inclusion_probs))
 ```

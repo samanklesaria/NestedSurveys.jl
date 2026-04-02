@@ -1,6 +1,7 @@
 module Surveys
 using Statistics, StatsBase, StatsAPI, StatsModels, DiffResults, ForwardDiff, PDMats
 using LinearAlgebra, Distributions, GLM
+using SizeCheck
 include("docboilerplate.jl")
 
 export SampleSum, SI, WithReplacement, WithoutReplacement, SurveyDesign
@@ -15,15 +16,20 @@ abstract type SurveyDesign end
 """
 With-replacement survey design. Used for probability-weighted ratio estimators (Hansen-Hurwitz) for population totals and means.
 """
-struct WithReplacement <: SurveyDesign
+Base.@kwdef struct WithReplacement <: SurveyDesign
+    "Marginal sample inclusion probabilities"
     probs::Vector{Float64}
+    "Population size"
+    N::Union{Nothing,Int} = nothing
 end
 
 """
 Without-replacement survey design. Used to compute the Horvitz-Thompson estimate of a population total.
 """
 struct WithoutReplacement <: SurveyDesign
+    "Marginal sample inclusion probabilities"
     probs::Vector{Float64}
+    "Pairwise joint sample inclusion probabilities"
     joint_probs::Matrix{Float64}
 end
 
@@ -48,20 +54,31 @@ struct SampleSum
     var::Float64
 end
 
+Base.:≈(a::SampleSum, b::SampleSum) = (a.sum ≈ b.sum) && (a.var ≈ b.var)
 
 """
 Compute a design-based estimate of a population sum using samples `xs` collected with survey design `probs`.
 """
-function Base.sum(xs::AbstractVector{<:Real}, probs::SurveyDesign)
+function Base.sum(xs::AbstractVector, probs::SurveyDesign)
     throw(DomainError(probs, "Sample totals have not been implemented for design $(typeof(probs))."))
 end
 
-"""
-Compute a design-based estimate of a nonlinear function of population totals using samples `xs` collected with survey design `probs`.
-Uses Taylor series linearization with gradients from automatic differentiation.
-"""
-function Base.sum(f::Function, xs::Matrix{<:Real}, probs::SurveyDesign)
-    throw(DomainError(probs, "Taylor estimation has not been implemented for design $(typeof(probs))."))
+cluster_estimate(x::Real) = x
+cluster_estimate(x::SampleSum) = x.sum
+
+cluster_var(x::Real) = 0.0
+cluster_var(x::SampleSum) = x.var
+
+function Base.sum(f::Function, xs::AbstractMatrix, design::SurveyDesign)
+    x_vals = cluster_estimate.(xs)
+    x_vars = cluster_var.(xs)
+    x0_M = vec(mapslices(x_vals, dims=(1,)) do x
+        sum(x, design).sum
+    end)
+    result = DiffResults.GradientResult(x0_M)
+    ForwardDiff.gradient!(result, f, x0_M)
+    ∇f_M = DiffResults.gradient(result)
+    SampleSum(DiffResults.value(result), sum((x_vals + x_vars) * ∇f_M, design).var)
 end
 
 """
@@ -82,12 +99,8 @@ R's `survey::svydesign()` with `id=~cluster`
 """
 function Base.sum(xs::AbstractVector{SampleSum}, probs::SurveyDesign)
     ss = sum([x.sum for x in xs], probs)
-    SampleSum(ss.sum, ss.var + cluster_variance([x.var for x in xs], probs))
+    SampleSum(ss.sum, ss.var + sum([x.var for x in xs], probs).sum)
 end
-
-cluster_variance(xs, probs::SI) = probs.N * mean(xs)
-cluster_variance(xs, probs::WithoutReplacement) = sum(xs ./ probs.probs)
-
 
 Base.:+(a::SampleSum, b::SampleSum) = SampleSum(a.sum + b.sum, a.var + b.var)
 Base.:+(a::Real, b::SampleSum) = SampleSum(a + b.sum, b.var)
@@ -98,54 +111,12 @@ function StatsAPI.confint(a::SampleSum; level=0.95)
     quantile.(Normal(a.sum, sqrt(a.var)), [α, 1 - α])
 end
 
-"""
-Multivariate population estimates.
-These structs are created when `sum` is passed Matrix and `SurveyDesign` arguments.
-`SampleSums` structs are usually collapsed into a
-`SampleSum` using `sum(f::Function, xs)` for stratified studies or cluster studies.
-
-# Example
-```julia
-sums = sum([api_stu; enroll], SI(N))
-total = sum(a -> a[1] / a[2], [sums])
-```
-"""
-struct SampleSums
-    "Estimates of population totals for each variable"
-    sums_M::Vector{Float64}
-    "Sample x variable matrix of observations"
-    samples_nM::Matrix{Float64}
-    "Population size"
-    N::Int
-end
-
 Base.sum(xs::AbstractVector{<:Real}, probs::Bernoulli) =
     SampleSum(1 / probs.p * sum(xs), (1 / probs.p - 1) * sum(xs .^ 2))
 
-Base.sum(xs::AbstractMatrix{<:Real}, probs::SI) =
-    SampleSums(probs.N * vec(mean(xs; dims=1)), xs, probs.N)
-
-function Base.sum(f::Function, xs::Vector{SampleSums})
-    x0_M = sum(x.sums_M for x in xs)
-    result = DiffResults.GradientResult(x0_M)
-    ForwardDiff.gradient!(result, f, x0_M)
-    ∇f_M = DiffResults.gradient(result)
-    result_var = sum(xs; init=0.0) do x
-        sum(x.samples_nM * ∇f_M, SI(x.N)).var
-    end
-    SampleSum(DiffResults.value(result), result_var)
-end
-
-function Base.sum(f::Function, xs::Vector{SampleSums}, probs::SI)
-    N = probs.N
-    x0_M = N * mean(x.sums_M for x in xs)
-    result = DiffResults.GradientResult(x0_M)
-    ForwardDiff.gradient!(result, f, x0_M)
-    ∇f_M = DiffResults.gradient(result)
-    us = [sum(x.samples_nM * ∇f_M, SI(x.N)) for x in xs]
-    v = var(u.sum for u in us; corrected=true)
-    SampleSum(DiffResults.value(result),
-        N^2 * (1 / length(us) - 1 / N) * v + N * mean(u.var for u in us))
+function Base.sum(xs::AbstractVector{<:Real}, probs::WithReplacement)
+    y = xs ./ probs.probs
+    SampleSum(mean(y), var(y; corrected=true) / length(xs))
 end
 
 function Base.sum(xs::AbstractVector{<:Real}, probs::SI)
@@ -164,95 +135,66 @@ function Base.sum(xs::AbstractVector{<:Real}, probs::WithoutReplacement)
     SampleSum(sum(y), y' * (Δ * y))
 end
 
-function Base.sum(f::Function, xs::Matrix{<:Real}, probs::WithoutReplacement)
-    x0 = vec(sum(xs ./ reshape(probs.probs, (:, 1)); dims=1))
-    result = DiffResults.GradientResult(x0)
-    ForwardDiff.gradient!(result, f, x0)
-    ∇f = DiffResults.gradient(result)
-    u = (xs * ∇f) ./ probs.probs
-    Δ = 1 .- (probs.probs .* probs.probs') ./ probs.joint_probs
-    SampleSum(DiffResults.value(result), u' * (Δ * u))
-end
-
-function Base.sum(f::Function, xs::Matrix{<:Real}, probs::SI)
-    N = probs.N
-    x0 = N * vec(mean(xs; dims=1))
-    result = DiffResults.GradientResult(x0)
-    ForwardDiff.gradient!(result, f, x0)
-    ∇f = DiffResults.gradient(result)
-    u = xs * ∇f
-    SampleSum(DiffResults.value(result), N^2 * (1 / size(xs, 1) - 1 / N) * var(u; corrected=true))
-end
-
-function GLM.lm(f::FormulaTerm, df, probs::SI)
-    N = probs.N
-    X, y = (modelmatrix(f, df), response(f, df))
-    XX = X' * X
-    β = XX \ (X'y)
-    V = PDiagMat((y - X * β) .^ 2)
-    n = length(y)
-    SampleSum.(β, (1 - n / N) * (n / (n - 1)) * diag(XX \ (XX \ Xt_A_X(V, X))'))
-end
-
-function GLM.lm(f::FormulaTerm, df, probs::WithoutReplacement)
-    X, y = (modelmatrix(f, df), response(f, df))
-    Λ = Diagonal(1 ./ probs.probs)
-    XX = Xt_A_X(Λ, X)
-    β = XX \ (X' * Λ * y)
-    R = Diagonal(y - X * β)
-    Δ = 1 .- (probs.probs .* probs.probs') ./ probs.joint_probs
-    V = X_A_Xt(Δ, X' * Λ * R)
-    SampleSum(β, XX \ (XX \ V)')
+function Base.sum(f::Function, xs::AbstractMatrix{<:Real}, design::SurveyDesign)
+    x0_M = vec(mapslices(xs, dims=(1,)) do x
+        sum(x, design).sum
+    end)
+    result = DiffResults.GradientResult(x0_M)
+    ForwardDiff.gradient!(result, f, x0_M)
+    ∇f_M = DiffResults.gradient(result)
+    SampleSum(DiffResults.value(result), sum(xs * ∇f_M, design).var)
 end
 
 pop_total(probs::SI) = probs.N
 pop_total(probs::WithoutReplacement) = sum(probs.probs)
 
-function Base.sum(f::FormulaTerm, df, df2, probs::SurveyDesign)
-    X, y = (modelmatrix(f, df), response(f, df))
-    X2 = modelmatrix(f, df2)
-    t_x = sum(X2; dims=1)
-    if f.rhs isa Tuple && f.rhs[1] isa ConstantTerm
-        t_x[1] = pop_total(probs)
+function pop_total(probs::WithReplacement)
+    if isnothing(probs.N)
+        error("Population total unknown; cannot use intercept in model based estimate")
     end
-    model_based_sum(X, t_x, y, probs)
+    probs.N
 end
 
-function model_based_sum(X, t_x, y::AbstractVector{SampleSum}, probs::SurveyDesign)
-    ss = model_based_sum(X, t_x, [yi.sum for yi in y], probs)
-    SampleSum(ss.sum, ss.var + cluster_variance([yi.var for yi in y], probs))
+function Base.sum(f::FormulaTerm, df, df2, probs::SurveyDesign)
+    y = modelcols(f.lhs, df)
+    X = modelmatrix(f.rhs, df)
+    X2 = modelmatrix(f.rhs, df2)
+    s = sum(X2; dims=1)
+    if f.rhs isa Tuple && f.rhs[1] isa ConstantTerm
+        s[1] = pop_total(probs)
+    end
+    model_based_sum(X, s, y, probs)
 end
 
-# Hold on: why is the expression for WithoutReplacment so much
-# simpler than for SI? What if I made g = vec(t_x * A) for SI instead?
-function model_based_sum(X, t_x, y, probs::WithoutReplacement)
-    Λ = Diagonal(1 ./ probs.probs)
-    XX = Xt_A_X(Λ, X)
-    A = XX \ (X' * Λ)
-    g = vec(t_x * A)
-    β = A * y
-    e = y - X * β
-    u = g .* e
-    Δ = 1 .- (probs.probs .* probs.probs') ./ probs.joint_probs
-    SampleSum(sum(g .* y), u' * (Δ * u))
+function model_based_sum(X, s, y::AbstractVector{SampleSum}, probs::SurveyDesign)
+    ss = model_based_sum(X, s, cluster_estimate.(y), probs)
+    SampleSum(ss.sum, ss.var + sum([yi.var for yi in y], probs).sum)
 end
 
-function model_based_sum(X, t_x, y, probs::SI)
-    N = probs.N
-    n = length(y)
-    XX = X' * X
-    A = XX \ X'
-    t_hat_x = N * mean(X; dims=1)
+function T_estimator(X, probs::T) where {T<:Union{WithoutReplacement,WithReplacement}}
+    Xt_A_X(PDiagMat(1 ./ probs.probs), X)
+end
+
+function T_estimator(X, probs::SI)
     n = size(X, 1)
-    g = 1 .+ vec((n / N) * (t_x - t_hat_x) * A)
-    β = A * y
-    e = y - X * β
-    SampleSum(N * mean(g .* y), N^2 * (1 - n / N) / n * var(g .* e; corrected=true))
+    Xt_A_X(ScalMat(n, probs.N / n), X)
 end
 
-function Base.sum(xs::AbstractVector{<:Real}, probs::WithReplacement)
-    y = xs ./ probs.probs
-    SampleSum(mean(y), var(y; corrected=true) / length(xs))
+@sizecheck function t_estimator(X_MD, y_M, probs::T) where {T<:Union{WithoutReplacement,WithReplacement}}
+    X_MD' * (y_M ./ probs.probs)
+end
+
+@sizecheck function t_estimator(X_MD, y_M, probs::SI)
+    (probs.N ./ M) * (X_MD' * y_M)
+end
+
+@sizecheck function model_based_sum(X_ND, s_1D, y_N, probs::SurveyDesign)
+    @assert N > 1
+    T_DD = T_estimator(X_ND, probs)
+    t_D = t_estimator(X_ND, y_N, probs)
+    β_D = T_DD \ t_D
+    g_N = vec(s_1D * (T_DD \ X_ND')) .* (y_N - X_ND * β_D)
+    SampleSum(dot(vec(s_1D), β_D), sum(g_N, probs).var)
 end
 
 end # module Surveys

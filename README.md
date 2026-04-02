@@ -79,28 +79,6 @@ ratio_result = @combine(apisrs, :total =
 
 The `sum` function uses automatic differentiation to compute the Taylor series approximation to the variance of nonlinear estimators.
 
-## Linearization with Stratification and Clustering
-
-When `sum` is passed a Matrix and `SI` object, it creates a `SampleSums` object. This can be passed to `sum` to get clustered or stratified Taylor series variance estimates.
-
-```julia
-@chain apistrat begin
-    @groupby(:stype)
-    @combine(:subtotal = sum([:api_stu :enroll], SI(Int(:fpc[1]))))
-    @combine(:total = sum(a->a[1] / a[2], :subtotal))
-end
-```
-
-## Coefficient Estimation
-
-For regression coefficient estimation with design-based variance, use `π_lm` with a formula and design specification.
-
-```julia
-π_lm(@formula(api_stu ~ 1 + enroll), apisrs, SI(Int(apisrs[1, :fpc])))
-```
-
-The `π_lm` function returns a vector of `SampleSum` objects, one for each coefficient, with design-based variance estimates.
-
 ## Regression-Assisted Estimation
 
 For regression-assisted (calibration) estimation, use `sum` with a formula, sample data, population data, and design.
