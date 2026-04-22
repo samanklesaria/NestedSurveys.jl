@@ -1,16 +1,17 @@
-# Surveys.jl
+# NestedSurveys.jl
 
-A Julia package for design-based inference in survey sampling. This package provides functionality comparable to R's `survey` package, with native Julia performance and integration with DataFrames.jl.
+A Julia package for design-based inference in survey sampling. This package provides functionality comparable to R's `survey` package, with native Julia performance and integration with DataFrames.jl. It is similar in spirit to the [Survey.jl](https://xkdr.github.io/Survey.jl) package, but allows for true multi-stage sampling with different designs at each stage.
 
 ## Overview
 
-`Surveys.jl` implements methods for analyzing data from complex survey designs, including:
+`NestedSurveys.jl` implements methods for analyzing data from complex survey designs, including:
 
 - Simple random sampling (SRS)
 - Stratified sampling
 - One-stage cluster sampling
 - Two-stage cluster sampling
 - Taylor series variance estimation
+- Confidence intervals
 - Ratio estimation
 
 The main exported type is `SampleSum`, which stores both an estimate and its variance. Sampling designs are specified with `SurveyDesign` structs, including `SI` (simple random sampling without replacement), `WithReplacement`,  `WithoutReplacement`, and `Bernoulli`.
@@ -21,7 +22,7 @@ For simple random sampling without replacement, use `sum` with an `SI` object th
 
 **Julia:**
 ```julia
-using Surveys, DataFramesMeta
+using NestedSurveys, DataFramesMeta
 result = @combine(apisrs, :total = sum(:enroll, SI(N)))
 ```
 
@@ -154,5 +155,5 @@ This computes the Horvitz-Thompson estimator with arbitrary inclusion probabilit
 ## API Reference
 
 ```@autodocs
-Modules = [Surveys]
+Modules = [NestedSurveys]
 ```

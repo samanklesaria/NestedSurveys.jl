@@ -1,6 +1,6 @@
-module Surveys
+module NestedSurveys
 using Statistics, StatsBase, StatsAPI, StatsModels, DiffResults, ForwardDiff, PDMats
-using LinearAlgebra, Distributions, GLM
+using LinearAlgebra, Distributions
 using SizeCheck
 include("docboilerplate.jl")
 
@@ -56,12 +56,22 @@ end
 
 Base.:≈(a::SampleSum, b::SampleSum) = (a.sum ≈ b.sum) && (a.var ≈ b.var)
 
+Base.:/(a::SampleSum, b::Real) = SampleSum(a.sum / b, a.var / b^2)
+Base.:*(a::SampleSum, b::Real) = SampleSum(a.sum * b, a.var * b^2)
+Base.:*(a::Real, b::SampleSum) = SampleSum(b.sum * a, b.var * a^2)
+
 """
 Compute a design-based estimate of a population sum using samples `xs` collected with survey design `probs`.
 """
 function Base.sum(xs::AbstractVector, probs::SurveyDesign)
     throw(DomainError(probs, "Sample totals have not been implemented for design $(typeof(probs))."))
 end
+
+"""
+Compute a design-based estimate of a population mean using samples `xs` collected with survey design `probs`.
+"""
+Statistics.mean(xs::AbstractVector, probs::SurveyDesign) = sum((x, n)->x/n,
+    [xs ones(length(xs))], probs)
 
 cluster_estimate(x::Real) = x
 cluster_estimate(x::SampleSum) = x.sum

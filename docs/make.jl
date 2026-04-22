@@ -1,14 +1,14 @@
 using Documenter
-using Surveys
+using NestedSurveys
 
 makedocs(
-    sitename="Surveys",
+    sitename="NestedSurveys",
     format=Documenter.HTML(sidebar_sitename=false),
     pages=[],
-    modules=[Surveys]
+    modules=[NestedSurveys]
 )
 
 deploydocs(
-    repo="github.com/samanklesaria/Surveys.jl.git",
+    repo="github.com/samanklesaria/NestedSurveys.jl.git",
     devbranch="main"
 )

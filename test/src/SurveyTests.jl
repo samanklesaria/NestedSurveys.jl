@@ -1,7 +1,7 @@
 module SurveyTests
 
 import Random
-using Surveys, RCall, DataFrames, DataFramesMeta, CSV, StatsBase, StatsModels, GLM, LinearAlgebra
+using NestedSurveys, RCall, DataFrames, DataFramesMeta, CSV, StatsBase, StatsModels, GLM, LinearAlgebra
 
 function get_data()
     crime = DataFrame(CSV.File("crime_data.csv"))

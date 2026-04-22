@@ -1,10 +1,10 @@
-# Surveys.jl
+# NestedSurveys.jl
 
-A Julia package for design-based inference in survey sampling. This package provides functionality comparable to R's `survey` package, with native Julia performance and integration with DataFrames.jl. [![][docs-dev-img]][docs-dev-url]
+A Julia package for design-based inference in survey sampling. This package provides functionality comparable to R's `survey` package, with native Julia performance and integration with DataFrames.jl.  It is similar in spirit to [Survey.jl](https://xkdr.github.io/Survey.jl), but allows for true multi-stage sampling with different designs at each stage. [![][docs-dev-img]][docs-dev-url]
 
 ## Overview
 
-`Surveys.jl` implements methods for analyzing data from complex survey designs, including:
+`NestedSurveys.jl` implements methods for analyzing data from complex survey designs, including:
 
 - Simple random sampling (SRS)
 - Stratified sampling
@@ -21,7 +21,7 @@ The main exported type is `SampleSum`, which stores both an estimate and its var
 For simple random sampling without replacement, use `sum` with an `SI` object that specifies the population size.
 
 ```julia
-using Surveys, DataFramesMeta
+using NestedSurveys, DataFramesMeta
 result = @combine(apisrs, :total = sum(:enroll, SI(N)))
 ```
 
@@ -88,4 +88,4 @@ assisted_result = sum(@formula(api_stu ~ 1 + enroll), apisrs, (; enroll=[4e6]), 
 ```
 
 [docs-dev-img]: https://img.shields.io/badge/docs-dev-blue.svg
-[docs-dev-url]: https://samanklesaria.github.io/Surveys.jl
+[docs-dev-url]: https://samanklesaria.github.io/NestedSurveys.jl.jl
