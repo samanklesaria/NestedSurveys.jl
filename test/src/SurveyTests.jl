@@ -140,7 +140,7 @@ function r_estimate(df, stratified, clusters, model1, model2, totals, design, de
     reval(design_str)
     if model1 == :sum
         SampleSum(rcopy(R"with_var(svytotal(~Burglary, design_r))")...)
-    elseif model1 == :rato
+    elseif model1 == :ratio
         SampleSum(rcopy(R"with_var(svyratio(~Burglary, ~Theft, design_r))")...)
     elseif model1 == :regress
         r_totals = @combine(totals, :Theft = sum(:Theft))
