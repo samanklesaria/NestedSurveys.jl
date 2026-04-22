@@ -31,7 +31,7 @@ function testit()
     for clusters in 0:2
         for stratified in [false, true]
             for design in [:si, :pps, :replace]
-                for model1 in [:sum, :regress, :ratio]
+                for model1 in [:sum, :regress, :ratio] # mean
                     if clusters == 2
                         design2_options = [:si, :pps, :replace]
                         model2_options = [:sum, :regress]
@@ -123,7 +123,7 @@ end
 # Are :totals being filtered properly?
 
 function r_estimate(df, stratified, clusters, model1, model2, totals, design, design2)
-    if model2 != sum
+    if model2 != :sum
         return nothing # Not supported in R
     end
     @rput df
@@ -148,6 +148,9 @@ function r_estimate(df, stratified, clusters, model1, model2, totals, design, de
         @rput r_totals
         reval("c_design <- calibrate(design_r, formula=~Theft, population=r_totals)")
         SampleSum(rcopy(R"with_var(svytotal(~Burglary, c_design))")...)
+    elseif model1 == :mean
+        # TODO
+        return nothing
     end
 end
 
@@ -183,6 +186,8 @@ function cluster_totals(df, design_sym, probs_col, fpc_col, model, totals)
     elseif model == :ratio
         @combine(df,
             :Burglary = sum((a -> a[1] / a[2]), [:Burglary :Theft], d))
+    elseif model == :mean
+        @combine(df, :Burglary = mean(:Burglary, d))
     else
         error("Invalid model type $model")
     end

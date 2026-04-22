@@ -70,8 +70,7 @@ end
 """
 Compute a design-based estimate of a population mean using samples `xs` collected with survey design `probs`.
 """
-Statistics.mean(xs::AbstractVector, probs::SurveyDesign) = sum((x, n)->x/n,
-    [xs ones(length(xs))], probs)
+Statistics.mean(xs::AbstractVector, probs::SurveyDesign) = sum((x, n)->x/n, [xs ones(length(xs))], probs)
 
 cluster_estimate(x::Real) = x
 cluster_estimate(x::SampleSum) = x.sum
