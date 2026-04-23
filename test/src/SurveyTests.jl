@@ -19,8 +19,18 @@ function testit()
     Random.seed!(7)
     R"""
     library(survey)
+    library(tidyverse)
     with_var <- function(result) {
-        c(result, SE(result)^2)
+        c(result[[1]], SE(result)^2[[1]])
+    }
+    pop_totals <- function(df) {
+      df |>
+        pivot_longer(c(fpc, Theft), names_to = "col") |>
+        mutate(name = if_else(col == "fpc",
+          paste0("factor(IndexYear)", IndexYear),
+          paste0("factor(IndexYear)", IndexYear, ":Theft"))) |>
+        select(name, value) |>
+        deframe()
     }
     """
     # @testset "cal_crime" begin
@@ -144,9 +154,20 @@ function r_estimate(df, stratified, clusters, model1, model2, totals, design, de
         SampleSum(rcopy(R"with_var(svyratio(~Burglary, ~Theft, design_r))")...)
     elseif model1 == :regress
         r_totals = @combine(totals, :Theft = sum(:Theft))
-        r_totals = insertcols(r_totals, "(Intercept)" => df[1, :fpc])
+        if stratified
+            counts = @by(df, :IndexYear, :fpc=first(:fpc))
+            r_totals = innerjoin(r_totals, counts, on=:IndexYear)
+        else
+            r_totals = insertcols(r_totals, "(Intercept)" => df[1, :fpc])
+        end
+
         @rput r_totals
-        reval("c_design <- calibrate(design_r, formula=~Theft, population=r_totals)")
+        if stratified
+            R"r_totals <- pop_totals(r_totals)"
+            reval("c_design <- calibrate(design_r, formula=~0+factor(IndexYear)+factor(IndexYear):Theft, population=r_totals, calfun='linear')")
+        else
+            reval("c_design <- calibrate(design_r, formula=~Theft, population=r_totals, calfun='linear')")
+        end
         SampleSum(rcopy(R"with_var(svytotal(~Burglary, c_design))")...)
     elseif model1 == :mean
         # TODO
