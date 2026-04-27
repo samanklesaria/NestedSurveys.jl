@@ -69,15 +69,15 @@ The variance calculation properly accounts for both stages of sampling through t
 
 ## Ratio Estimation
 
-For ratio estimation or other nonlinear functions of totals, use `sum` with a `Function` argument for Taylor series linearization.
+For ratio estimation or other nonlinear functions of totals, use `taylor` with a `Function` argument for Taylor series linearization. 
 
 ```julia
 # Estimate ratio of api.stu to enroll
 ratio_result = @combine(apisrs, :total = 
-    sum((a -> a[1] / a[2]), [:api_stu :enroll], SI(Int(:fpc[1]))))
+    taylor(a -> a[1] / a[2], g-> sum(g([:api_stu :enroll]), SI(Int(:fpc[1])))))
 ```
 
-The `sum` function uses automatic differentiation to compute the Taylor series approximation to the variance of nonlinear estimators.
+The `taylor` function uses automatic differentiation to compute the Taylor series approximation to the variance of nonlinear estimators.
 
 ## Regression-Assisted Estimation
 

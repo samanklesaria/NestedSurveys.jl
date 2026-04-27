@@ -4,7 +4,7 @@ using LinearAlgebra, Distributions
 using SizeCheck
 include("docboilerplate.jl")
 
-export SampleSum, SI, WithReplacement, WithoutReplacement, SurveyDesign
+export SampleSum, SI, WithReplacement, WithoutReplacement, SurveyDesign, taylor
 
 # Abstract Interfaces
 
@@ -54,6 +54,12 @@ struct SampleSum
     var::Float64
 end
 
+cluster_estimate(x::Real) = x
+cluster_estimate(x::SampleSum) = x.sum
+
+cluster_var(x::Real) = 0.0
+cluster_var(x::SampleSum) = x.var
+
 Base.:≈(a::SampleSum, b::SampleSum) = (a.sum ≈ b.sum) && (a.var ≈ b.var)
 
 Base.:/(a::SampleSum, b::Real) = SampleSum(a.sum / b, a.var / b^2)
@@ -61,33 +67,38 @@ Base.:*(a::SampleSum, b::Real) = SampleSum(a.sum * b, a.var * b^2)
 Base.:*(a::Real, b::SampleSum) = SampleSum(b.sum * a, b.var * a^2)
 
 """
-Compute a design-based estimate of a population sum using samples `xs` collected with survey design `probs`.
+Combine cluster-level estimates for multi-stage sampling designs. This is used for cluster sampling or
+multi-stage designs where you have already computed estimates within each sampled cluster.
+The returned variance properly accounts for clustering.
 """
-function Base.sum(xs::AbstractVector, probs::SurveyDesign)
-    throw(DomainError(probs, "Sample totals have not been implemented for design $(typeof(probs))."))
+function Base.sum(xs::AbstractVector, design::SurveyDesign)
+    ss = sum(cluster_estimate.(xs.vals), xs.design)
+    ss.var + sum(cluster_var.(xs.vals), xs.design).sum
+    SampleSum(ss.sum, ss.var + sum([x.var for x in xs], xs.design).sum)
+end
+
+function Base.sum(xs::AbstractMatrix, design::SurveyDesign)
+    mapslices(xs, dims=1) do x
+        sum(x, design)
+    end
 end
 
 """
 Compute a design-based estimate of a population mean using samples `xs` collected with survey design `probs`.
 """
-Statistics.mean(xs::AbstractVector, probs::SurveyDesign) = sum((x, n)->x/n, [xs ones(length(xs))], probs)
+Statistics.mean(xs::AbstractVector, probs::SurveyDesign) =
+    taylor(y -> y[1] / y[2]) do g
+        sum(g([xs ones(length(xs))]), probs)
+    end
 
-cluster_estimate(x::Real) = x
-cluster_estimate(x::SampleSum) = x.sum
-
-cluster_var(x::Real) = 0.0
-cluster_var(x::SampleSum) = x.var
-
-function Base.sum(f::Function, xs::AbstractMatrix, design::SurveyDesign)
-    x_vals = cluster_estimate.(xs)
-    x_vars = cluster_var.(xs)
-    x0_M = vec(mapslices(x_vals, dims=(1,)) do x
-        sum(x, design).sum
-    end)
-    result = DiffResults.GradientResult(x0_M)
-    ForwardDiff.gradient!(result, f, x0_M)
+function taylor(sum_of::Function, f::Function)
+    xs = vec(cluster_estimate.(sum_of(x -> cluster_estimate.(x))))
+    result = DiffResults.GradientResult(xs)
+    ForwardDiff.gradient!(result, f, xs)
     ∇f_M = DiffResults.gradient(result)
-    SampleSum(DiffResults.value(result), sum((x_vals + x_vars) * ∇f_M, design).var)
+    var_of_E = sum_of(x -> cluster_estimate.(x) * ∇f_M).var
+    E_of_var = sum_of(x -> cluster_var.(x) * ∇f_M).sum
+    SampleSum(DiffResults.value(result), var_of_E + E_of_var)
 end
 
 """
@@ -142,16 +153,6 @@ function Base.sum(xs::AbstractVector{<:Real}, probs::WithoutReplacement)
     Δ = 1 .- (probs.probs .* probs.probs') ./ probs.joint_probs
     y = xs ./ probs.probs
     SampleSum(sum(y), y' * (Δ * y))
-end
-
-function Base.sum(f::Function, xs::AbstractMatrix{<:Real}, design::SurveyDesign)
-    x0_M = vec(mapslices(xs, dims=(1,)) do x
-        sum(x, design).sum
-    end)
-    result = DiffResults.GradientResult(x0_M)
-    ForwardDiff.gradient!(result, f, x0_M)
-    ∇f_M = DiffResults.gradient(result)
-    SampleSum(DiffResults.value(result), sum(xs * ∇f_M, design).var)
 end
 
 pop_total(probs::SI) = probs.N

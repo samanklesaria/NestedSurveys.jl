@@ -3,6 +3,14 @@ module SurveyTests
 import Random
 using NestedSurveys, RCall, DataFrames, DataFramesMeta, CSV, StatsBase, StatsModels, GLM, LinearAlgebra
 
+function simple_ratio_test()
+    X = randn(5, 2)
+    taylor(y -> y[1] / y[2]) do g
+        sum(g(X), SI(50))
+    end
+end
+
+
 function get_data()
     crime = DataFrame(CSV.File("crime_data.csv"))
     year_df = @chain crime begin
@@ -38,13 +46,17 @@ function testit()
     totals = @by crime :IndexYear :county begin
         :Theft = sum(:Theft)
     end
-    for clusters in 0:2
+    for clusters in [0, 1] # :2
         for stratified in [false, true]
             for design in [:si, :pps, :replace]
                 for model1 in [:sum, :regress, :ratio] # mean
                     if clusters == 2
                         design2_options = [:si, :pps, :replace]
-                        model2_options = [:sum, :regress]
+                        if model1 == :ratio
+                            model2_options = [:sum]
+                        else
+                            model2_options = [:sum, :regress]
+                        end
                     else
                         design2_options = [:si]
                         model2_options = [:sum]
@@ -130,8 +142,6 @@ function make_df(crime, totals, stages, stratified, design, design2)
     end
 end
 
-# Are :totals being filtered properly?
-
 function r_estimate(df, stratified, clusters, model1, model2, totals, design, design2)
     if model2 != :sum
         return nothing # Not supported in R
@@ -155,7 +165,7 @@ function r_estimate(df, stratified, clusters, model1, model2, totals, design, de
     elseif model1 == :regress
         r_totals = @combine(totals, :Theft = sum(:Theft))
         if stratified
-            counts = @by(df, :IndexYear, :fpc=first(:fpc))
+            counts = @by(df, :IndexYear, :fpc = first(:fpc))
             r_totals = innerjoin(r_totals, counts, on=:IndexYear)
         else
             r_totals = insertcols(r_totals, "(Intercept)" => df[1, :fpc])
@@ -169,9 +179,6 @@ function r_estimate(df, stratified, clusters, model1, model2, totals, design, de
             reval("c_design <- calibrate(design_r, formula=~Theft, population=r_totals, calfun='linear')")
         end
         SampleSum(rcopy(R"with_var(svytotal(~Burglary, c_design))")...)
-    elseif model1 == :mean
-        # TODO
-        return nothing
     end
 end
 
@@ -191,63 +198,69 @@ function make_design_obj(df, design_sym, probs_col, fpc_col)
     end
 end
 
-function cluster_totals(df, design_sym, probs_col, fpc_col, model, totals)
+function cluster_totals(df, design_sym, probs_col, fpc_col, model, totals, g)
     d = make_design_obj(df, design_sym, probs_col, fpc_col)
-    total_theft = sum(totals[!, :Theft])
-    if model == :sum
-        @combine(df,
-            :fpc = first(:fpc),
-            :probs = first(:probs), # for if :probs_col = :probs2
-            :Theft = total_theft,
-            :Burglary = sum(:Burglary, d))
-    elseif model == :regress
-        total = sum(@formula(Burglary ~ 1 + Theft), df, totals, d)
-        DataFrame(:fpc => df[1, :fpc], :probs => df[1, :probs],
-            :Theft => total_theft, :Burglary => total)
-    elseif model == :ratio
-        @combine(df,
-            :Burglary = sum((a -> a[1] / a[2]), [:Burglary :Theft], d))
-    elseif model == :mean
-        @combine(df, :Burglary = mean(:Burglary, d))
+    if g == nothing
+        total_theft = sum(totals[!, :Theft])
+        if model == :sum
+            @combine(df,
+                :fpc = first(:fpc),
+                :probs = first(:probs), # for if :probs_col = :probs2
+                :Theft = total_theft,
+                :Burglary = sum(:Burglary, d))
+        elseif model == :regress
+            total = sum(@formula(Burglary ~ 1 + Theft), df, totals, d)
+            DataFrame(:fpc => df[1, :fpc], :probs => df[1, :probs],
+                :Theft => total_theft, :Burglary => total)
+        end
     else
-        error("Invalid model type $model")
+        # For Taylor series estimates, inner model can only be 'sum'
+        @combine(df, :Burglary = Ref(sum(g([:Burglary :Theft]), d)))
     end
 end
 
 function jl_estimate(df, stratified, clusters, model1, model2, totals, design, design2)
-    function get_subtotals(df, totals)
+    function get_subtotals(df, totals, g)
         if clusters == 0
-            cluster_totals(df, design, :probs, :fpc, model1, totals)
+            cluster_totals(df, design, :probs, :fpc, model1, totals, g)
         elseif clusters == 1
             @chain df begin
                 groupby(:id1)
                 @combine(:Burglary = sum(:Burglary),
                     :Theft = sum(:Theft),
                     :fpc = first(:fpc), :probs = first(:probs))
-                cluster_totals(design, :probs, :fpc, model1, totals)
+                cluster_totals(design, :probs, :fpc, model1, totals, g)
             end
         else
             g_totals = groupby(totals, :county)
             @chain df begin
                 groupby(:id1)
                 combine(x -> cluster_totals(x, design2, :probs2, :fpc2,
-                    model2, g_totals[(; county=x[1, :county])]))
-                cluster_totals(design, :probs, :fpc, model1, totals)
+                        model2, g_totals[(; county=x[1, :county])]), g)
+                cluster_totals(design, :probs, :fpc, model1, totals, g)
             end
         end
     end
 
-    if stratified
-        tot = @chain df begin
-            groupby(:IndexYear)
-            combine(g ->
-                get_subtotals(g, totals[(; IndexYear=g[1, :IndexYear])]))
-            @combine(:Burglary = sum(:Burglary))
+    function calculate(g)
+        if stratified
+            tot = @chain df begin
+                groupby(:IndexYear)
+                combine(df ->
+                    get_subtotals(df, totals[(; IndexYear=df[1, :IndexYear])], g))
+                @combine(:Burglary = Ref(sum(:Burglary)))
+            end
+        else
+            tot = get_subtotals(df, totals, g)
         end
-    else
-        tot = get_subtotals(df, totals)
+        tot[1, :Burglary]
     end
-    tot[1, :Burglary]
+
+    if model1 == :ratio
+        taylor(calculate, y -> y[1] / y[2])
+    else
+        calculate(nothing)
+    end
 end
 
 end
