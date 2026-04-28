@@ -46,7 +46,7 @@ function testit()
     totals = @by crime :IndexYear :county begin
         :Theft = sum(:Theft)
     end
-    for clusters in [0, 1] # :2
+    for clusters in [0, 1, 2]
         for stratified in [false, true]
             for design in [:si, :pps, :replace]
                 for model1 in [:sum, :regress, :ratio] # mean
@@ -144,7 +144,7 @@ end
 
 function r_estimate(df, stratified, clusters, model1, model2, totals, design, design2)
     if model2 != :sum
-        return nothing # Not supported in R
+        return nothing # TODO
     end
     @rput df
     id_arg = clusters == 0 ? "id=~1" : clusters == 1 ? "id=~id1" : "id=~id1+id2"
@@ -161,6 +161,9 @@ function r_estimate(df, stratified, clusters, model1, model2, totals, design, de
     if model1 == :sum
         SampleSum(rcopy(R"with_var(svytotal(~Burglary, design_r))")...)
     elseif model1 == :ratio
+        if clusters > 1
+            return nothing # TODO
+        end
         SampleSum(rcopy(R"with_var(svyratio(~Burglary, ~Theft, design_r))")...)
     elseif model1 == :regress
         r_totals = @combine(totals, :Theft = sum(:Theft))
@@ -174,10 +177,14 @@ function r_estimate(df, stratified, clusters, model1, model2, totals, design, de
         @rput r_totals
         if stratified
             R"r_totals <- pop_totals(r_totals)"
-            reval("c_design <- calibrate(design_r, formula=~0+factor(IndexYear)+factor(IndexYear):Theft, population=r_totals, calfun='linear')")
+            formula="formula=~0+factor(IndexYear)+factor(IndexYear):Theft"
         else
-            reval("c_design <- calibrate(design_r, formula=~Theft, population=r_totals, calfun='linear')")
+            formula = "formula=~Theft"
         end
+        if clusters != 0
+           return nothing # TODO
+        end
+        reval("c_design <- calibrate(design_r, $formula, population=r_totals, calfun='linear')")
         SampleSum(rcopy(R"with_var(svytotal(~Burglary, c_design))")...)
     end
 end
@@ -214,7 +221,6 @@ function cluster_totals(df, design_sym, probs_col, fpc_col, model, totals, g)
                 :Theft => total_theft, :Burglary => total)
         end
     else
-        # For Taylor series estimates, inner model can only be 'sum'
         @combine(df, :Burglary = Ref(sum(g([:Burglary :Theft]), d)))
     end
 end
@@ -236,7 +242,7 @@ function jl_estimate(df, stratified, clusters, model1, model2, totals, design, d
             @chain df begin
                 groupby(:id1)
                 combine(x -> cluster_totals(x, design2, :probs2, :fpc2,
-                        model2, g_totals[(; county=x[1, :county])]), g)
+                        model2, g_totals[(; county=x[1, :county])], nothing))
                 cluster_totals(design, :probs, :fpc, model1, totals, g)
             end
         end

@@ -107,7 +107,7 @@ variance of a different sum, giving ``\text{Var}(g)`` where
 
 ## Sampling Clusters Without Replacement
 
-We can apply the with-replacement estimator recursively to estimates of cluster totals.
+We can apply the without-replacement estimator recursively to estimates of cluster totals.
 In this context, let $I_i = 1$ if cluster $i$ is sampled. By linearity, the estimator ``\hat{t} = \sum_{i \in \text{PSU}} I_i \frac{\hat{t}_i}{\pi_i}`` is unbiased. We can get its variance from the law of total variance:
 
 ```math

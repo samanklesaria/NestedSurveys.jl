@@ -72,9 +72,8 @@ multi-stage designs where you have already computed estimates within each sample
 The returned variance properly accounts for clustering.
 """
 function Base.sum(xs::AbstractVector, design::SurveyDesign)
-    ss = sum(cluster_estimate.(xs.vals), xs.design)
-    ss.var + sum(cluster_var.(xs.vals), xs.design).sum
-    SampleSum(ss.sum, ss.var + sum([x.var for x in xs], xs.design).sum)
+    ss = sum(cluster_estimate.(xs), design)
+    SampleSum(ss.sum, ss.var + sum(cluster_var.(xs), design).sum)
 end
 
 function Base.sum(xs::AbstractMatrix, design::SurveyDesign)
