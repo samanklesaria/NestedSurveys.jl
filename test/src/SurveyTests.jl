@@ -69,11 +69,57 @@ function r_stage0_estimate(df, design_sym, model)
 end
 
 function test_stage0(df, design_sym, model)
-    println("d-$design_sym m-$model")
+    println("c-0_d-$design_sym m-$model")
     df = extract_samples(df, design_sym, 1)
     @rput df
     r = r_stage0_estimate(df, design_sym, model)
     jl = jl_stage0_estimate(df, design_sym, model)
+    @assert jl ≈ r "$jl ≉ $r"
+end
+
+function r_stage1_estimate(df, design_sym, model)
+    if design_sym == :si
+        R"design <- svydesign(id=~id1, fpc=~fpc, data=df)"
+    elseif design_sym == :replace
+        R"design <- svydesign(id=~id1, probs=~probs, data=df)"
+    end
+    if model == :sum
+        SampleSum(rcopy(R"with_var(svytotal(~Burglary, design))")...)
+    elseif model == :regress
+        totals = select(df, :fpc => "(Intercept)", :total_theft=>:Theft)[1:1,:]
+        @rput totals
+        R"design <- calibrate(design, formula=~Theft, population=totals, calfun='linear', aggregate.stage=1)"
+        SampleSum(rcopy(R"with_var(svytotal(~Burglary, design))")...)
+    end
+end
+
+function jl_stage1_estimate(df, design_sym, model)
+    total_theft = df[1, :total_theft]
+    design = make_design_obj(df, design_sym, :probs, :fpc)
+    df = @chain df begin
+        groupby(:id1)
+        @combine(:Burglary = sum(:Burglary),
+            :fpc = first(:fpc), :probs = first(:probs),
+            :Theft= first(:county_theft))
+    end
+    if model == :sum
+        sum(df[!,:Burglary], design)
+    elseif model == :regress
+        sum(@formula(Burglary ~ 1 + Theft), df, (; Theft=[total_theft]), design)
+    end
+end
+
+function test_stage1(df, design_sym, model)
+    println("c-1_d-$design_sym m-$model")
+    counties = @chain df begin
+        groupby(:county)
+        @select(:county)
+        extract_samples(design_sym, 1)
+    end
+    df = innerjoin(counties, df, on=:county)
+    @rput df
+    r = r_stage1_estimate(df, design_sym, model)
+    jl = jl_stage1_estimate(df, design_sym, model)
     @assert jl ≈ r "$jl ≉ $r"
 end
 
@@ -91,6 +137,7 @@ function testit()
     for design_sym in [:si, :replace]
         for model in [:sum, :regress]
             test_stage0(df, design_sym, model)
+            test_stage1(df, design_sym, model)
         end
     end
 end
