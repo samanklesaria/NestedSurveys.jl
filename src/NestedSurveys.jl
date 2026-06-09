@@ -180,8 +180,13 @@ function model_based_sum(X, s, y::AbstractVector{SampleSum}, probs::SurveyDesign
     SampleSum(ss.sum, ss.var + sum([yi.var for yi in y], probs).sum)
 end
 
-function T_estimator(X, probs::T) where {T<:Union{WithoutReplacement,WithReplacement}}
+function T_estimator(X, probs::WithoutReplacement)
     Xt_A_X(PDiagMat(1 ./ probs.probs), X)
+end
+
+function T_estimator(X, probs::WithReplacement)
+    n = size(X, 1)
+    Xt_A_X(PDiagMat(1 ./ (n .* probs.probs)), X)
 end
 
 function T_estimator(X, probs::SI)
@@ -189,8 +194,12 @@ function T_estimator(X, probs::SI)
     Xt_A_X(ScalMat(n, probs.N / n), X)
 end
 
-@sizecheck function t_estimator(X_MD, y_M, probs::T) where {T<:Union{WithoutReplacement,WithReplacement}}
+@sizecheck function t_estimator(X_MD, y_M, probs::WithoutReplacement)
     X_MD' * (y_M ./ probs.probs)
+end
+
+@sizecheck function t_estimator(X_MD, y_M, probs::WithReplacement)
+    X_MD' * (y_M ./ (M .* probs.probs))
 end
 
 @sizecheck function t_estimator(X_MD, y_M, probs::SI)
