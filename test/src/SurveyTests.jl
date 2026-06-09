@@ -38,7 +38,7 @@ function make_design_obj(df, design_sym, probs_col, fpc_col)
     if design_sym == :si
         SI(N)
     elseif design_sym == :replace
-        WithReplacement(df[:, probs_col] ./ size(df, 1), N)
+        WithReplacement(df[:, probs_col], N)
     end
 end
 

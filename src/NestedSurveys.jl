@@ -135,7 +135,8 @@ Base.sum(xs::AbstractVector{<:Real}, probs::Bernoulli) =
 
 function Base.sum(xs::AbstractVector{<:Real}, probs::WithReplacement)
     y = xs ./ probs.probs
-    SampleSum(mean(y), var(y; corrected=true) / length(xs))
+    n = length(xs)
+    SampleSum(sum(y), n * var(y; corrected=true))
 end
 
 function Base.sum(xs::AbstractVector{<:Real}, probs::SI)
@@ -180,13 +181,8 @@ function model_based_sum(X, s, y::AbstractVector{SampleSum}, probs::SurveyDesign
     SampleSum(ss.sum, ss.var + sum([yi.var for yi in y], probs).sum)
 end
 
-function T_estimator(X, probs::WithoutReplacement)
+function T_estimator(X, probs::T) where {T<:Union{WithoutReplacement,WithReplacement}}
     Xt_A_X(PDiagMat(1 ./ probs.probs), X)
-end
-
-function T_estimator(X, probs::WithReplacement)
-    n = size(X, 1)
-    Xt_A_X(PDiagMat(1 ./ (n .* probs.probs)), X)
 end
 
 function T_estimator(X, probs::SI)
@@ -194,12 +190,8 @@ function T_estimator(X, probs::SI)
     Xt_A_X(ScalMat(n, probs.N / n), X)
 end
 
-@sizecheck function t_estimator(X_MD, y_M, probs::WithoutReplacement)
+@sizecheck function t_estimator(X_MD, y_M, probs::T) where {T<:Union{WithoutReplacement,WithReplacement}}
     X_MD' * (y_M ./ probs.probs)
-end
-
-@sizecheck function t_estimator(X_MD, y_M, probs::WithReplacement)
-    X_MD' * (y_M ./ (M .* probs.probs))
 end
 
 @sizecheck function t_estimator(X_MD, y_M, probs::SI)
